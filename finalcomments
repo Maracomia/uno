@@ -1,0 +1,1221 @@
+import pygame, sys
+import sqlite3, hashlib
+import random, os
+
+#initialize pygame
+pygame.init()
+#screen dimensions
+screen_width, screen_height = 800, 600
+screen = pygame.display.set_mode((screen_width, screen_height))
+#screen name
+pygame.display.set_caption("Digital UNO!")
+
+#constant colours used
+white = (255, 255, 255)
+dark_grey = (134, 134, 134)
+grey = (200, 200, 200)
+
+#constant fonts used
+font=pygame.font.Font(None, 50)
+font2=pygame.font.Font(None, 30)
+font3=pygame.font.Font(None, 20)
+
+#button dimentions
+button_width, button_height = 200, 60
+
+
+# Connect to database (or create it)
+database = sqlite3.connect("users.db")
+mycursor = database.cursor()
+
+# Create users table if it doesn't exist
+mycursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password TEXT,
+                wins INTEGER,
+                total_games INTEGER )''')
+database.commit() #saves the table and the contents
+
+def hash_password(password): #hashing algorithm
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def register_user(username, password):
+    if not username.strip() or not password.strip():
+        return False #if the fields are left empty, return false
+
+    try: #if the username doesn't exist
+        mycursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", 
+                       (username, hash_password(password))) #insert into table
+        database.commit() #save the change
+        return True #successful
+    except sqlite3.IntegrityError:
+        return False #unsuccessful registration
+
+def validate_login(username, password):
+    if not username.strip() or not password.strip(): #if there are empty fields
+        return "Please fill in both username and password."
+    #SQL query to find the password for a username
+    # (username,) needed to make it a siingle element instead of a tuple
+    mycursor.execute("SELECT password FROM users WHERE username=?", (username,))
+    result = mycursor.fetchone() #fist matching result from the table is stored
+    if result and result[0] == hash_password(password):
+        #if the result isnt none and the result[0] is = to the hashed version
+        return True #return true
+    return False #else return false
+
+def get_user_wins(username):
+    database = sqlite3.connect("users.db") #connects to the database
+    mycursor = database.cursor() #connects the cursor to manipulate the database
+    #fetch the wins from the table where the username is the username in the parameter
+    mycursor.execute("SELECT wins FROM users WHERE username = ?", (username,))
+    result = mycursor.fetchone() #result from the query is stored here
+    database.close() #close the database to aavoid corruption
+    return result[0] if result else None #if there are no wins, return none
+
+def get_user_total(username):
+    database = sqlite3.connect("users.db")  #connects to the database
+    mycursor = database.cursor() #conects the cursor to manipulate the database
+    #fetch the total games played from the table where the username is the username in the parameter
+    mycursor.execute("SELECT total_games FROM users WHERE username = ?", (username,))
+    result = mycursor.fetchone() #result from the query is stored here
+    database.close() #close the database to avoid corruption
+    return result[0] if result else None #if there are no games played, return none
+
+def increment_user_wins(username):
+    database = sqlite3.connect("users.db") #connects to the database
+    mycursor = database.cursor() #connects the cursor to manipulate the database
+    #add one to the number of wins where the username is the username in the parameter
+    mycursor.execute("UPDATE users SET wins = wins + 1 WHERE username = ?", (username,))
+    database.commit() #commit and close the database
+    database.close()
+
+def increment_user_plays(username):
+    database = sqlite3.connect("users.db") #connects to the database
+    mycursor = database.cursor() #connects the cursor to manipulate the database
+    #add one to the number games played where the username is the username in the parameter
+    mycursor.execute("UPDATE users SET total_games = total_games + 1 WHERE username = ?", (username,))
+    database.commit() #commit and close the database
+    database.close()
+
+def draw_button(text, x, y, w, h, colour, hover_colour, mouse_pos, 
+                screen, border_radius=30):
+    #creating a rectangle in pygame to make the button
+    draw = pygame.Rect(x, y, w, h)
+    #if the mouse is above the button, change the colour of the button to the hover colour. 
+    if draw.collidepoint(mouse_pos):
+        pygame.draw.rect(screen, hover_colour, draw, border_radius=border_radius)
+    else: #if the mouse is not on the button
+        #keep the default colour
+        pygame.draw.rect(screen, colour, draw, border_radius=border_radius) 
+
+    #will make the text white and will centre the text onto the button
+    text = font.render(text, True, white)
+    textbutton = text.get_rect(center=(x + w // 2, y + h // 2))
+    screen.blit(text, textbutton) #Screen.blit will display the button on the screen.
+
+    return draw
+
+def start():
+    #loading and scaling the images using the load and scale functions inbuilt into pygame
+    background = pygame.image.load("images/mainbackground.jpg")
+    #will make the background the same dimensions of the window
+    background = pygame.transform.scale(background, (screen_width, screen_height)) 
+
+    logo = pygame.image.load("images/logo.png")
+    logo = pygame.transform.scale(logo, (666, 375))
+
+    #logo animation when the screen loads up
+    logo_x = -logo.get_width()  #starts on the left side
+    logo_y = screen_height // 3 - logo.get_height() // 2  
+    """will place the logo above the login and signup options by
+    making the y position ⅓ of the actual screen height - ½ of the
+    logo height"""
+    x_position = screen_width // 2 - logo.get_width() // 2  #target x-position (centered)
+    speed = 10  #pixels per frame the logo will move per second
+
+    while True:
+        screen.blit(background, (0, 0))  #displaying the background image
+
+        mouse_pos = pygame.mouse.get_pos() #taking the position of the mouse after every game loop
+
+        #event handler
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: #if the user presses the X
+                pygame.quit()
+                sys.exit() #the window will shut down
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if login_button.collidepoint(mouse_pos):
+                    loginpage() #transition to the login page if the login button is pressed
+                if signup_button.collidepoint(mouse_pos):
+                    signuppage() #transition to the sign up page if the sign up button is pressed
+
+        #making the logo slide in
+        if logo_x < x_position: #as long as the position isn't the target
+            logo_x += speed #will make the logo move speed (defined above as speed=10)amount of pixels per frame
+            if logo_x > x_position:  #if the logo reaches more than the target x position, the logo will stay still
+                logo_x = x_position #locked into the final position
+
+        #display the logo
+        screen.blit(logo, (logo_x, logo_y))
+
+        #drawing the buttons using the draw_button procedure
+        login_button = draw_button("Log In", screen_width // 2 - button_width // 2, 370,
+                        button_width, button_height, dark_grey, grey, mouse_pos, screen)
+        signup_button = draw_button("Sign Up", screen_width // 2 - button_width // 2, 470, 
+                        button_width, button_height, dark_grey, grey, mouse_pos, screen)
+
+        pygame.display.update() #updates the display after every game loop
+
+# Input fields
+username_input = "" #holds the username input of the user
+password_input = "" #holds the password input of the user
+current = None  #track active input field
+BLACK = (0, 0, 0)
+logged_in_user = None
+def loginpage():
+    background = pygame.image.load("images/mainbackground.jpg")
+    background = pygame.transform.scale(background, (screen_width, screen_height))
+
+    #button
+    button_width, button_height = 200, 60
+
+    #draw button
+    def draw_button(text, x, y, width, height, colour, hover_colour, mouse_pos, screen, border_radius=15):
+        #creating a rectangle in pygame to make the button
+        draw = pygame.Rect(x, y, width, height)
+        #if the mouse is above the button, change the colour to the hover colour
+        if draw.collidepoint(mouse_pos):
+            pygame.draw.rect(screen, hover_colour, draw, border_radius=border_radius)
+        else:#if the mouse isnt on the button
+            #keep the default colour
+            pygame.draw.rect(screen, colour, draw, border_radius=border_radius)
+        #will make the text white and centre the text to the button
+        text = font.render(text, True, WHITE)
+        textbutton = text.get_rect(center=(x + width // 2, y + height // 2))
+        screen.blit(text, textbutton) #displays the button
+        return draw
+
+    #colours
+    WHITE = (255, 255, 255)
+    GREY = (200, 200, 200)
+    DARK_GREY = (134, 134, 134)
+
+    #fonts
+    font = pygame.font.Font(None, 32)
+
+    #input box is drawn
+    def draw_input_box(text, x, y, active):
+        """Draws an input box with text."""
+        colour = WHITE if active else GREY #changes the colour to white if pressed
+        pygame.draw.rect(screen, colour, (x, y, 200, 32), 2)
+        text_surface = font.render(text, True, WHITE) #used for the text typed into the box
+        screen.blit(text_surface, (x+5, y+5)) #prints the text inside the box
+
+    def draw_message(msg, y, colour=WHITE): #used to display a message
+        text_surface = font.render(msg, True, colour)
+        screen.blit(text_surface, (screen_width//2 - text_surface.get_width()//2, y))
+
+    def main():
+        #global as the variable value must change even outside of the subroutine
+        global username_input, password_input, current, logged_in_user
+
+        clock = pygame.time.Clock()
+        message = "" # empty string is stored in message currently
+
+        while True:
+            mouse_pos = pygame.mouse.get_pos() #current mouse position
+            screen.blit(background,(0,0)) #display background
+            
+            draw_message("ENTER LOGIN DETAILS", 150) #title
+            if "successful" in message: #green message
+                draw_message(message, 350, (0, 255, 0))
+            else: #red message
+                draw_message(message, 350, (255, 0, 0))
+
+            #username box
+            draw_input_box(username_input, 380, 200, current == "username")
+            #password box
+            draw_input_box("*" * len(password_input), 380, 270, current == "password")
+
+            #displaying the prompts for the user to enter the details
+            text_surface = font.render("Username:", True, WHITE)
+            screen.blit(text_surface, (250, 200))
+            text_surface = font.render("Password:", True, WHITE)
+            screen.blit(text_surface, (250, 270))
+            
+            #button made to check the details entered by the user
+            login_button = draw_button("Login", 300, 400, button_width, 
+                                        button_height, DARK_GREY, GREY, mouse_pos, screen)
+
+            pygame.display.flip() #update the display
+
+            #event handler
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit() #if the X is pressed
+                    sys.exit()#shut down the window
+
+                if event.type == pygame.MOUSEBUTTONDOWN: #user clicks
+                    x, y = event.pos #current coordinate
+                    if 380 <= x <= 480 and 200 <= y <= 232:  #username box area
+                        current = "username" #saves under username if in the area
+                    elif x in range(380, 480) and y in range (270, 322): #password box area
+                        current = "password" #saves under password if in the area
+                    elif login_button.collidepoint(mouse_pos): #if the login button is clicked
+                        if not username_input.strip() or not password_input.strip():  # presence check
+                            message = "Please fill in every field."
+                        elif validate_login(username_input, password_input):
+                            message = "Login successful!" #succesful login check
+                            logged_in_user = username_input
+                            welcome()
+                        else:
+                            message = "Invalid username or password." #if the login is invalid
+
+                if event.type == pygame.KEYDOWN and current: #if the user is typing
+                    if event.key == pygame.K_BACKSPACE: #pressing the backspace button
+                        if current == "username": #for the username
+                            username_input = username_input[:-1] #everything before the last input
+                        else: #for the password
+                            password_input = password_input[:-1] #everything before the last input
+                    elif event.key == pygame.K_RETURN: #if the enter key is pressed
+                        current = None #do not save ant other keys that are pressed
+                    else:
+                        if current == "username":
+                            username_input += event.unicode #append to username_input
+                        else:
+                            password_input += event.unicode #append to password_input
+
+            clock.tick(30)
+
+    if __name__ == "__main__":
+        main()
+
+# Input fields
+username_input = "" #holds the username input of the user
+password_input = "" #holds the password input of the user
+password_reenter_input = "" #holds the password re-enter of the user
+current = None  # tracks what the user is inputting
+BLACK = (0, 0, 0)
+def signuppage():
+    background = pygame.image.load("images/mainbackground.jpg")
+    background = pygame.transform.scale(background, (screen_width, screen_height))
+
+    #button
+    button_width, button_height = 200, 60
+
+    #draw button
+    def draw_button(text, x, y, width, height, colour, hover_colour, mouse_pos, screen, border_radius=15):
+        #creating a rectangle in pygame to make the button
+        draw = pygame.Rect(x, y, width, height)
+        #if the mouse is above the button, change the colour to the hover colour
+        if draw.collidepoint(mouse_pos):
+            pygame.draw.rect(screen, hover_colour, draw, border_radius=border_radius)
+        else: #if the mouse isnt on the button
+            pygame.draw.rect(screen, colour, draw, border_radius=border_radius)
+        # will make the text white and centre the text to the button
+        text = font.render(text, True, WHITE)
+        textbutton = text.get_rect(center=(x + width // 2, y + height // 2))
+        screen.blit(text, textbutton) #displays the button
+        return draw
+
+    #colours
+    WHITE = (255, 255, 255)
+    GREY = (200, 200, 200)
+    DARK_GREY = (134, 134, 134)
+
+    #fonts
+    font = pygame.font.Font(None, 32)
+
+    def draw_input_box(text, x, y, active):
+        colour = WHITE if active else DARK_GREY #changes colour if pressed
+        pygame.draw.rect(screen, colour, (x, y, 200, 32), 2)
+        text_surface = font.render(text, True, WHITE) #used for the text typed into the box
+        screen.blit(text_surface, (x+5, y+5)) #prints the tet inside the box
+
+    def draw_message(msg, y, colour=WHITE): #used to display a message
+        text_surface = font.render(msg, True, colour)
+        screen.blit(text_surface, (screen_width//2 - text_surface.get_width()//2, y))
+
+    def main():
+        #global as the variable value must change even outside of the subroutine
+        global username_input, password_input, password_reenter_input, current
+
+        clock = pygame.time.Clock()
+        message = "" #empty string currently stored in message currently
+
+        while True:
+            mouse_pos = pygame.mouse.get_pos() #current mouse position
+            screen.blit(background,(0,0)) #display the background
+            
+            draw_message("ENTER SIGN UP DETAILS", 150) #title
+
+            if "successfully" in message: #green message
+                draw_message(message, 385, (0, 255, 0))
+            else: #red message
+                draw_message(message, 385, (255, 0, 0))
+
+            #username box
+            draw_input_box(username_input, 380, 200, current == "username")
+            #password box
+            draw_input_box(password_input, 380, 270, current == "password")
+            #re-enter password box
+            draw_input_box(password_reenter_input, 380, 340, current == "password_reenter")
+
+            #prompts that ask the user for their details
+            text_surface = font.render("Username:", True, WHITE)
+            screen.blit(text_surface, (250, 200))
+            text_surface = font.render("Password:", True, WHITE)
+            screen.blit(text_surface, (250, 270))
+            text_surface = font.render("Re-enter your Password:", True, WHITE)
+            screen.blit(text_surface, (100, 340))
+            
+            #button made to check the inputs by the user
+            signup_button = draw_button("Sign Up", 300, 430, button_width, 
+                                        button_height, DARK_GREY, GREY, mouse_pos, screen)
+
+            pygame.display.flip() #update the display
+
+            #event handler
+            for event in pygame.event.get(): #user click
+                if event.type == pygame.QUIT: 
+                    pygame.quit() #if the X is pressed
+                    sys.exit() #shut down the window
+
+                if event.type == pygame.MOUSEBUTTONDOWN: #user clicks
+                    x, y = event.pos #current coordinate
+                    if 380 <= x <= 480 and 200 <= y <= 232: #username box area
+                        current = "username" #saves under username if in the area
+                    if 380 <= x <= 480 and 270 <= y <= 302: #password box area
+                        current = "password" #saves unser password if in the area
+                    if 380 <= x <= 480 and 340 <= y <= 372: #password re-enter box area
+                        current = "password_reenter" #saves under passwerd_reenter if in the area
+                    if signup_button.collidepoint(mouse_pos): #if the signup button is clicked
+                        if not username_input.strip() or not password_input.strip() or not password_reenter_input.strip(): #presence check
+                            message = "You cannot have any empty fields"
+                        elif password_input != password_reenter_input: #if the password and the re-enter doesnt match
+                            message = "Passwords do not match"
+                        else: # length, number, and character validation
+                            num_count = sum(c.isdigit() for c in password_input) #counts the amount of numbers
+                            symbol_count = sum(not c.isalnum() for c in password_input) #counts the amount of symbols
+                            if len(password_input) < 6 or num_count < 2 or symbol_count < 1: #validation of the password
+                                message = "Password must be 6+ chars, include 2 numbers, and 1 symbol"
+                            elif register_user(username_input, password_input):
+                                message = "Signed up successfully!" #successful signup
+                            else:
+                                message = "Username already exists." #if the username is already found in the database
+
+                if event.type == pygame.KEYDOWN and current: #if the user is typing
+                    if event.key == pygame.K_BACKSPACE: #pressing the backspace button
+                        if current == "username": #for the username
+                            username_input = username_input[:-1] #everything before the last input
+                        elif current == "password": #for the password
+                            password_input = password_input[:-1] #everything before the last input
+                        else: #for the password-reenter section
+                            password_reenter_input = password_reenter_input[:-1] #everything before the last input
+                    elif event.key == pygame.K_RETURN: #if the enter key is pressed
+                        current = None #do not save any other keys that are pressed
+                    else:
+                        if current == "username":
+                            username_input += event.unicode #append to username_input
+                        elif current == "password":
+                            password_input += event.unicode #append to password_input
+                        else:
+                            password_reenter_input += event.unicode #append to password_reenter_input
+
+            clock.tick(30)
+
+    if __name__ == "__main__":
+        main()
+
+def welcome():
+    #load and scale the images using the load and scale functions
+    background = pygame.image.load("images/welcomebg.jpg")
+    background=pygame.transform.scale(background,(800, 600))
+
+    while True:
+        screen.blit(background, (0, 0))  #background image
+        mouse_pos = pygame.mouse.get_pos() #takes the current mouse position after every game loop
+        
+        #event handler
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if continue_button.collidepoint(mouse_pos):
+                    profilepage()#transition to profile page if the continue button is pressed
+                if instruction_button.collidepoint(mouse_pos):
+                    instructionpage() #transitions to the instruction pages if the instruction button is clicked
+ 
+        #drawing the buttons using the draw button function
+        continue_button = draw_button("Continue", 550, 500,
+                        button_width, button_height, dark_grey, grey, mouse_pos, screen)
+        instruction_button = draw_button("?", 690, 60,
+                        60, button_height, dark_grey, grey, mouse_pos, screen)
+        
+        """main title of the page is welcome + the username that the
+        user inputs at the start of the game when logging in."""
+        text= "Welcome " + logged_in_user + "!"
+        main_title=font.render(text, True, "black")
+        screen.blit(main_title,(100,150))
+        
+        #this is the text that will be displayed on the welcome page
+        text=font2.render("""Welcome to digital UNO! where you can play against 
+the computer to test your uno skills. This fun portable
+game has all the same rules as the well known and 
+loved UNO! game.If you need to refer back to the instructions, 
+press the ? icon on the top right hand side of the window."""
+, True, "black")
+       
+        screen.blit(text,(100,250)) #outputs the text onto the welcome page
+
+        pygame.display.update()
+
+def instructionpage():
+    """loading and scaling images each page will have a different 
+    background to make the pages distinguishable. 
+    The colours will be all of the colours of the uno cards"""
+    background1 = pygame.image.load("images/instructionbg.jpg")
+    background1=pygame.transform.scale(background1,(800, 600))
+    background2 = pygame.image.load("images/instructionbg2.jpg")
+    background2=pygame.transform.scale(background2,(800, 600))
+    background3 = pygame.image.load("images/instructionbg3.jpg")
+    background3=pygame.transform.scale(background3,(800, 600))
+    """the cards that I will put on my third page will be the 
+    special cards (plus 2, reverse, skip, wildcard, wildcard +4)"""
+    plus2 = pygame.image.load("images/cards/green_draw2.png")
+    plus2=pygame.transform.scale(plus2,(97,163))
+    reverse = pygame.image.load("images/cards/green_reverse.png")
+    reverse=pygame.transform.scale(reverse,(97,163))
+    skip = pygame.image.load("images/cards/green_skip.png")
+    skip=pygame.transform.scale(skip,(97,163))
+    wildcard = pygame.image.load("images/cards/wild_wild.png")
+    wildcard=pygame.transform.scale(wildcard,(97,163))
+    wildplus4 = pygame.image.load("images/cards/wild_draw4.png")
+    wildplus4=pygame.transform.scale(wildplus4,(97,163))
+
+    #function for the first page
+    def firstpage():
+        while True:
+            screen.blit(background1, (0, 0))  #background image
+            mouse_pos = pygame.mouse.get_pos() #current mouse position
+            #event handler
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if continue_button.collidepoint(mouse_pos):
+                        secondpage() #transitions to the next page if the continue button is pressed
+
+
+            #drawing the continue button using the draw_button function
+            continue_button = draw_button("Next", 550, 500,
+                            button_width, button_height, dark_grey, grey, mouse_pos, screen)
+            
+            #rendering the title of the first page
+            main_title=font.render("An introduction to UNO!", True, "white")
+            screen.blit(main_title,(100,150))
+
+            #rendering the text to be displayed to the user
+            text=font2.render("""Uno is a shedding type cards game where players aim
+to discard all of their cards. When one card is
+remaining in your hand, you must call UNO! by pressing
+the big UNO! button within 3 seconds to avoid being
+challenged (gaining two cards) """, True, "white")
+        
+            screen.blit(text,(100,250))
+
+            pygame.display.update() #updates the screen after every game loop
+
+    #function for the second page
+    def secondpage():
+        while True:
+            screen.blit(background2, (0, 0))  #background image
+            mouse_pos = pygame.mouse.get_pos()
+            #event handler
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if continue_button.collidepoint(mouse_pos):
+                        thirdpage() #transitions to the next page of the continue button is pressed
+
+            #drawing the continue button using the draw_button function
+            continue_button = draw_button("Next", 550, 500,
+                            button_width, button_height, dark_grey, grey, mouse_pos, screen)
+            
+            #rendering the title for the second page
+            main_title=font.render("Instructions", True, "white")
+            screen.blit(main_title,(100,150))
+
+            #text to be displayed on the second page
+            text=font2.render("""You must choose, from your hand, a card that has the
+same colour or the same number as the card on top of the
+discard pile (unless a special card is used).
+If you have no playable cards, you must pick up a
+card from the remaining card and discard it (if possible)""", True, "white")
+        
+            screen.blit(text,(100,250))
+
+            pygame.display.update()
+
+    #function for the third page
+    def thirdpage():
+        while True:
+            screen.blit(background3, (0, 0))  #background image
+            mouse_pos = pygame.mouse.get_pos()
+            #event handler
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if continue_button.collidepoint(mouse_pos):
+                        profilepage() #will transition to the profile page 
+                        #once the user has finished viewing the rules
+
+            #drawing the buttons using the draw_button function
+            continue_button = draw_button("Next", 550, 500,
+                            button_width, button_height, dark_grey, grey, mouse_pos, screen)
+            
+            #displaying all of the pictures of the special cards
+            screen.blit(plus2, (50, 120))
+            screen.blit(reverse, (280, 120))
+            screen.blit(skip, (510,120))
+            screen.blit(wildcard, (50, 370))
+            screen.blit(wildplus4, (280,370))
+
+            #title of page 3
+            main_title=font.render("Special Cards:", True, "white")
+            screen.blit(main_title,(50,50))
+
+            #short description of each special card displayed next to each
+            plus2text=font3.render("""next player
+picks up two""", True, "white")
+            screen.blit(plus2text,(150,150))
+            reversetext=font3.render("""Reverses the
+order of play""", True, "white")
+            screen.blit(reversetext,(380,150))
+            skiptext=font3.render("""Blocks the next
+player from playing
+a card""", True, "white")
+            screen.blit(skiptext,(610,150))
+            wildtext=font3.render("""Pick any
+colour of your
+choice""", True, "white")
+            screen.blit(wildtext,(150,400))
+            wildplus4text=font3.render("""Pick any
+colour of your
+choice and next
+player picks up two""", True, "white")
+            screen.blit(wildplus4text,(380,400))
+
+            pygame.display.update()
+
+    #calls the first page to start off the instructions function
+    firstpage()
+
+wins = None
+total_games = None
+def profilepage():
+    #loading and scaling images
+    background = pygame.image.load("images/mainbackground.jpg")
+    background=pygame.transform.scale(background,(800, 600))
+    profilepic = pygame.image.load("images/profilepic.png")
+    profilepic=pygame.transform.scale(profilepic,(280,280))
+
+    while True:
+        wins = get_user_wins(logged_in_user)
+        total_games = get_user_total(logged_in_user)
+        screen.blit(background, (0, 0))  #background image
+        mouse_pos = pygame.mouse.get_pos()
+        #event handler
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if instruction_button.collidepoint(mouse_pos):
+                    instructionpage() #transitions to the 
+                    #instructions page if the instructions button is 
+                    #pressed
+                if newgame_button.collidepoint(mouse_pos):
+                    maingame() #transitions to the main game 
+        
+        #displaying the images   
+        screen.blit(background,(0,0))
+        screen.blit(profilepic,(100,170))
+
+        #title of the page
+        main_title=font.render("Your Profile", True, "white")
+        screen.blit(main_title,(100,100))
+
+        #displayed text (when the database storing all user achievements is made)
+        text = f"""Wins: {wins}
+                         
+Games played: {total_games}"""
+        text=font2.render(text, True, "white")
+       
+        screen.blit(text,(400,250))
+
+        #Drawing the buttons using the draw_button function
+        newgame_button = draw_button("New Game", 550, 500,
+                        button_width, button_height, dark_grey, grey, mouse_pos, screen)
+        instruction_button = draw_button("?", 690, 60,
+                        60, button_height, dark_grey, grey, mouse_pos, screen)
+
+        pygame.display.update()
+
+def maingame():
+    """ 
+    Constants to be used (card dimensions and colours in order to 
+    maintain consistency and to make reusing RGB values easier)
+    """
+    CARD_WIDTH = 60
+    CARD_HEIGHT = 90
+    WHITE = (255, 255, 255)
+    BLACK = (0, 0, 0)
+    LIGHT_GREY = (211, 211, 211)
+    UNO_COLOURS = ["red", "yellow", "green", "blue"]
+    COLOUR_RGB = {"red": (255, 0, 0), "yellow": (255, 255, 0), "green": (0, 255, 0), "blue": (0, 0, 255)}
+
+    # Loading the card images from the folder
+    def load_card_images():
+        card_images = {}
+        card_folder = "images/cards"
+        #accessing the cards folder within the images folder in the project folder
+        for filename in os.listdir(card_folder):
+            if filename.endswith(".png"): #checks all of the images
+                #splits the image name into the colour and value units from the “.”
+                card_name = filename.split(".")[0] 
+                #creates  an image path for each of the images so they can be accessed and identified individually
+                image_path = os.path.join(card_folder, filename)
+                image = pygame.image.load(image_path) #loading the image
+                image = pygame.transform.scale(image, (CARD_WIDTH, CARD_HEIGHT)) #scaling the image so all of the cards are the same size
+                card_images[card_name] = image
+                #will assign the images to the card name and is stored in the card_images list
+        return card_images
+
+    #loads and scales the back image of the card in the same way as iterating through all of the cards
+    def load_back_image():
+        back_image_path = "images/back.png"
+        back_image = pygame.image.load(back_image_path)
+        #makes the back image the same dimensions as the normal cards
+        back_image = pygame.transform.scale(back_image, (CARD_WIDTH, CARD_HEIGHT))
+        return back_image
+
+    #loads and scales the background image of the game board so that it fills the whole window 
+    background_path = "images/background.jpg"
+    background = pygame.image.load(background_path)
+    background = pygame.transform.scale(background, (800, 600))
+
+    """
+    Card Class class has the attributes colour, value and the image in order to define each of the
+    cards separately. It has methods draw and is_clicked in order to make the space where the card 
+    can be clicked and in order to determine if the card is clicked
+    """
+    class Card:
+        #card constructor
+        def __init__(self, colour, value, image):
+            self.colour = colour
+            self.value = value
+            self.image = image
+            self.rect = self.image.get_rect()
+
+        #creates the area where the cards can be interacted with on the screen
+        def draw(self, surface, x, y):
+            self.rect.topleft = (x, y)
+            surface.blit(self.image, self.rect)
+
+        #checks if the card is clicked by comparing the collidepoint and the mouse position
+        def is_clicked(self, pos):
+            return self.rect.collidepoint(pos)
+    
+    """
+    The deck class is used to create the playable deck that is used within the game. It takes
+    in the card_images parameter and the build_deck, shuffle, refill_deck and draw_cards 
+    methods
+    """
+    class Deck:
+        #constructor method
+        def __init__(self, card_images):
+            self.cards = []
+            self.card_images = card_images
+            self.build_deck()
+            self.shuffle()
+
+        #builds the full uno deck to be used
+        def build_deck(self):
+            colours = UNO_COLOURS
+            values = [str(i) for i in range(10)] + ["skip", "reverse", "draw2"]
+            """
+            values used in an uno game uses cards numbered from 
+            0-9 and has skip, reverse, and draw 2 cards for each colour"
+            """
+            #will initialise the cards based on the colours and values by iterating through all of them 
+            for colour in colours:
+                for value in values:
+                    card_name = f"{colour}_{value}"
+                    if card_name in self.card_images:
+                        self.cards.append(Card(colour, value, self.card_images[card_name])) #appends to the list of cards
+
+            """
+            Adding Wild and Wild Draw Four Cards have to be separate as 
+            there are only 4 in a deck compared to normal colour-number 
+            cards"
+            """
+            for _ in range(4):
+                if "wild_wild" in self.card_images: #wildcard colour is wild, wildcard value is wild
+                    self.cards.append(Card("wild", "wild", self.card_images["wild_wild"]))
+                if "wild_draw4" in self.card_images: #wildcard +4 colour is wild, value is draw4
+                    self.cards.append(Card("wild", "draw4", self.card_images["wild_draw4"]))
+        
+        #procedure that shuffles all of the cards using shuffle() which is inbuilt into the random module
+        def shuffle(self):
+            random.shuffle(self.cards)
+        
+        #this procedure is needed in order to reload the cards if the cards on the main deck have run out
+        def refill_deck(self, discard_pile):
+            self.cards = discard_pile[:-1]  # Remove the top card which stays on the pile
+            random.shuffle(self.cards) #reloads the cards
+        
+        #for when a user needs a card if they don't have any playable cards in their hand
+        def draw_card(self):
+            return self.cards.pop() if self.cards else None #pops from the main deck stack to remove the top card
+
+    class Player:
+        #constructor method
+        def __init__(self, name, is_ai=False):
+            self.name = name
+            self.hand = []
+            self.is_ai = is_ai
+
+        #method that deals the cards at the start of the game
+        def draw_cards(self, deck, num):
+            for _ in range(num):
+                card = deck.draw_card() #uses the method from deck in order to take a card
+                if card:
+                    self.hand.append(card) #appends it to the players hand
+
+        #method used when the player selects a card to play on to the deck
+        def play_card(self, card):
+            self.hand.remove(card)
+
+        #this is the logic for the ai hand
+        def ai_play(self, top_card, deck):
+            for card in self.hand: #checks all of the cards in the ai hand
+                """
+                if the cards value or colour is the same as the top card then the ai will play it, similarly
+                if there is a wildcard in the ai hand, the ai will play that card. this ensures that the 
+                plays of the ai are correct but also logical
+                """
+                if card.colour == top_card.colour or card.value == top_card.value or card.colour == "wild":
+                    self.hand.remove(card)
+                    if card.colour == "wild":
+                        card.colour = random.choice(UNO_COLOURS) #AI picks a random colour
+                    return card
+            self.draw_cards(deck, 1) #will take one from the deck if there are no playable cards
+            return None
+
+        #will create the surface in which the user can interact with the card that they have just picked up
+        def draw_hand(self, surface, y, back_image=None):
+            card_count = len(self.hand)
+            total_width = card_count * CARD_WIDTH + (card_count - 1) * 10
+            start_x = (screen_width - total_width) // 2
+
+            if self.is_ai:
+                for i in range(card_count): #will only display the back image if the ai player picks up
+                    surface.blit(back_image, (start_x + i * (CARD_WIDTH + 10), y))
+            else:
+                """
+                will iterate through the hand and use the draw method from the card hand 
+                and draw the area that can be interacted with
+                """
+                for i, card in enumerate(self.hand):
+                    card.draw(surface, start_x + i * (CARD_WIDTH + 10), y)
+
+    class Game:
+        #class constructor
+        def __init__(self):
+            self.running = True 
+            self.card_images = load_card_images() #load card images to be used in the game
+            self.back_image = load_back_image()
+            self.deck = Deck(self.card_images) #deck is the images
+            self.players = [Player("Player 1"), Player("AI Player", is_ai=True)] #user vs ai
+            self.current_player = 0 #will change according to the skip card
+            self.pile = [] #discard pile
+            self.direction = 1 #will change according to the reverse card
+            self.ai_selected_colour=None
+            self.deck_rect = pygame.Rect(screen_width // 2 - CARD_WIDTH * 2,screen_height
+                                        // 2 - CARD_HEIGHT // 2, CARD_WIDTH, CARD_HEIGHT)
+            self.uno_button_image = pygame.image.load("images/logo.png") #uno logo image is loaded
+            self.uno_button_image = pygame.transform.scale(self.uno_button_image, (200, 100)) #scaling the logo
+            self.uno_button_rect = self.uno_button_image.get_rect()#makes the surface to interact with
+            self.uno_button_rect.topleft = (500, 250 ) #position of the uno button
+            self.show_uno_button = False #will only show if it is time to press uno
+            self.uno_pressed = False #stay false if the user hasnt pressed uno
+            self.uno_timer_start = None #timer to press uno
+            self.show_ai_challenge_button = False #option to challenge the ai
+            self.ai_uno_timer_start = None #timer to challenge
+            self.ai_challenge_rect = pygame.Rect(500, 250, 120, 50)
+            self.waiting_for_ai = False #buffer
+            self.ai_wait_start_time = None #buffer start
+
+            #initialises 7 cards to each player at the start of the game
+            for player in self.players:
+                player.draw_cards(self.deck, 7)
+            self.pile.append(self.deck.draw_card()) #rest are appended onto the main deck
+            self.current_colour = self.pile[-1].colour #the card on top of the pile's colour is the current colour
+
+        #runs all of the important procedures that should keep playing as the game goes
+        def run(self):
+            clock = pygame.time.Clock()
+            while self.running:
+                screen.blit(background, (0, 0))
+                self.handle_events()
+                self.update_game_logic()
+                self.draw_game()
+                pygame.display.flip()
+                clock.tick(30) #frames per second
+
+        def handle_events(self):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False #if the user presses the X the window will shut down
+                elif event.type == pygame.MOUSEBUTTONDOWN and not self.players[self.current_player].is_ai:
+                    pos = pygame.mouse.get_pos() #gets the mouse position of the user
+                    self.handle_card_click(pos) #is called if the user presses a card in their hand
+                    self.handle_deck_click(pos) #is called if the user presses the deck
+                    if self.show_uno_button and self.uno_button_rect.collidepoint(pos): #when its time to call uno,
+                        self.uno_pressed = True #if the user has presed the uno button
+                        self.show_uno_button = False #the uno button can be removed
+                    if self.show_ai_challenge_button and self.ai_challenge_rect.collidepoint(pos):
+                        self.players[1].draw_cards(self.deck, 2) #will give the ai 2 cards if it gets challenged
+                        self.show_ai_challenge_button = False #removes the button
+    
+        def handle_card_click(self, pos):
+            #takes the current player and the card before the player chooses a card
+            player = self.players[self.current_player]
+            top_card = self.pile[-1]
+
+            for card in player.hand:
+                if card.is_clicked(pos): #if a card is clicked
+                    if card.colour == top_card.colour or card.value == top_card.value or card.colour == "wild":
+                        if card.colour == "wild": #checks to see if the card is a wildcard
+                            card.colour = self.choose_colour() #asks the player for a colour
+                        player.play_card(card) #card is selected
+                        self.pile.append(card) #puts the card onto the discard pile
+                        self.current_colour = card.colour
+                        self.apply_special_card_effect(card) #checks if the card is a special card
+                        if len(player.hand) == 1: #if the player has one card left
+                            self.show_uno_button = True #show the uno button
+                            self.uno_pressed = False #if pressed, remove the button
+                            self.uno_timer_start = pygame.time.get_ticks() #start the timer for the button
+                        else:
+                            self.show_uno_button = False #keeps the button hidden
+                        self.waiting_for_ai = True #small buffer so the user can see the card that they played 
+                        self.ai_wait_start_time = pygame.time.get_ticks()
+                        self.next_turn() #next players turn
+                    break
+
+        #if the wildcard is played, a new colour must be selected
+        def choose_colour(self):
+            font = pygame.font.Font(None, 36)
+            selecting = True
+
+            while selecting:
+                screen.fill(WHITE)
+                text = font.render("Choose a Colour:", True, BLACK)
+                screen.blit(text, (screen_width // 2 - 80, screen_height // 2 - 100))
+
+                buttons = [] #creating the selection buttons to change the current colour
+                for i, colour in enumerate(UNO_COLOURS):
+                    rect = pygame.Rect(screen_width // 2 - 150 + i * 80, screen_height // 2, 70, 50)
+                    pygame.draw.rect(screen, COLOUR_RGB[colour], rect)
+                    buttons.append((rect, colour))
+
+                pygame.display.flip()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        pygame.quit()
+                        exit()
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        for rect, colour in buttons:
+                            if rect.collidepoint(event.pos):
+                                selecting = False #once the user has selected, selecting=false
+                                return colour #returns the button that has been pressed
+
+        def handle_deck_click(self, pos):
+            if self.deck_rect.collidepoint(pos): #if the main deck is pressed
+                self.draw_card_if_needed() #take a card from the pile
+
+        def update_game_logic(self):
+            player = self.players[self.current_player]
+
+            #winning logic
+            if len(player.hand) == 0: #if the player's hand is empty
+                if player.is_ai: #and the player is ai
+                    print ("you lost") #print in the terminal
+                else: #if the player is the user
+                    print("you won") #print in the terminal
+                return
+
+            # Handle AI delay before move
+            if player.is_ai and not self.waiting_for_ai:
+                self.waiting_for_ai = True #ai turn
+                self.ai_wait_start_time = pygame.time.get_ticks() #ai waits for a bit
+
+            if self.waiting_for_ai:
+                time = pygame.time.get_ticks() - self.ai_wait_start_time
+                if time >= 1500: #once 1.5 sec has passed
+                    top_card = self.pile[-1]
+                    card = player.ai_play(top_card, self.deck) #takes the ai played card
+                    if card:
+                        if card.value in ["wild", "draw4"]: 
+                            card.colour = random.choice(UNO_COLOURS) #ai pick a random colour
+                            self.ai_selected_colour = card.colour #colour choice of the ai is updated
+                        self.pile.append(card) #card is appended onto the discard pile
+                        self.current_colour = card.colour #colour is updated
+                        self.apply_special_card_effect(card) #if the ai plays a special card
+                    if len(player.hand) == 1: #if the ai has one card left
+                        self.show_ai_challenge_button = True #will show the challenge ai button
+                        self.ai_uno_timer_start = pygame.time.get_ticks() #timer to challenge starts
+                    else:
+                        self.show_ai_challenge_button = False #hides the ai challenge button
+                    self.next_turn() #next player
+                    self.waiting_for_ai = False
+
+            # Handle user not pressing UNO in time
+            # The user has 3 seconds to call uno
+            if self.show_uno_button and not self.uno_pressed:
+                time = pygame.time.get_ticks() - self.uno_timer_start #takes the time taken
+                if time > 3000:  # 3 seconds has passed
+                    self.players[self.current_player].draw_cards(self.deck, 2) #will make the user pick up 2 cards
+                    self.show_uno_button = False #hide the uno button
+
+            # Handle hot pressing AI challenge in time
+            # User has 1.5 sec to challenge the AI
+            if self.show_ai_challenge_button:
+                time = pygame.time.get_ticks() - self.ai_uno_timer_start #starts the timer
+                if time > 1500:  # 1.5 seconds has passed
+                    self.show_ai_challenge_button = False #hide the button
+
+        #special cards are identified by the value of the card
+        def apply_special_card_effect(self, card):
+            if card.value == "skip":
+                self.skip_turn() #skips the next player
+            elif card.value == "reverse":
+                self.reverse_direction() #reverses the direction of play
+            elif card.value == "draw2":
+                self.draw2_cards() 
+            elif card.value == "draw4":
+                self.draw4_cards() #draw 4 cards AND change the colour
+                if not self.players[self.current_player].is_ai: 
+                    card.colour = self.choose_colour()
+    
+        #procedures for the special cards including the draw 4 for the wild 
+        def skip_turn(self):
+            self.next_turn()
+        def reverse_direction(self):
+            self.direction *= -1
+        def draw2_cards(self):
+            next_player = self.players[(self.current_player + self.direction) % len(self.players)]
+            next_player.draw_cards(self.deck, 2)
+        def draw4_cards(self):
+            next_player = self.players[(self.current_player + self.direction) % len(self.players)]
+            next_player.draw_cards(self.deck, 4)
+
+        #next player
+        def next_turn(self):
+            self.current_player = (self.current_player + self.direction) % len(self.players)
+
+        """
+        if the player doesnt have any playable cards, the user can pick up from 
+        the deck, if they do, then they are forced to play the card. this makes it
+        more robust as this can be a problem in the real game (not playing a card
+        when you had to)
+        """
+        def draw_card_if_needed(self):
+            player = self.players[self.current_player]
+            if not self.check_for_playable_cards(player):
+                if self.deck.cards:
+                    player.draw_cards(self.deck, 1) #allows the user to get a new card from the deck
+                else:
+                    self.refill_deck_if_needed() #refills the deck if there are no more cards
+                    player.draw_cards(self.deck, 1) #again, allows the suer to pick a card
+                self.next_turn() #next player goes
+
+        """
+        checks for playable cards by iterating through the current players hand
+        and sees if there is a playable card adn comparing it to the top card (the 
+        end of the pile was the one that was the most recently appended)
+        """
+        def check_for_playable_cards(self, player):
+            top_card = self.pile[-1]
+            for card in player.hand:
+                if card.colour == top_card.colour or card.value == top_card.value:
+                    return True #if theres a playable card
+            return False #if theres no playable cards
+
+        #refills the main deck is it runs out again
+        def refill_deck_if_needed(self):
+            if not self.deck.cards:
+                self.deck.refill_deck(self.pile)
+                self.pile = [self.pile[-1]]
+
+        def draw_game(self):
+            #shows the top card on the discard pile
+            if self.pile:
+                self.pile[-1].draw(screen, screen_width // 2, screen_height // 2 - CARD_HEIGHT // 2)
+            #draw the main deck using the back image
+            if self.deck.cards:
+                screen.blit(self.back_image, self.deck_rect.topleft)
+            #draw each player's hand onto the screen
+            for i, player in enumerate(self.players):
+                y = screen_height - 150 if i == 0 else 50
+                player.draw_hand(screen, y, back_image=self.back_image)
+            #colour icon on the left of the deck
+            if self.current_colour in COLOUR_RGB:
+                icon_rect = pygame.Rect(150, screen_height//2-30, 60, 60)
+                pygame.draw.rect(screen, COLOUR_RGB[self.current_colour], icon_rect, border_radius = 15)
+            # UNO button is shown when it is needed
+            if self.show_uno_button:
+                screen.blit(self.uno_button_image, self.uno_button_rect)
+            # challenge AI button is shown when it is needed
+            if self.show_ai_challenge_button:
+                pygame.draw.rect(screen, (0, 100, 255), self.ai_challenge_rect, border_radius=10)
+                pygame.draw.rect(screen, BLACK, self.ai_challenge_rect, 2, border_radius=10)
+                font = pygame.font.Font(None, 24)
+                text = font.render("Challenge AI", True, WHITE)
+                text_rect = text.get_rect(center=self.ai_challenge_rect.center)
+                screen.blit(text, text_rect)
+
+    if __name__ == "__main__":
+        game = Game()
+        game.run()
+        pygame.quit()
+
+def losepage():
+    background = pygame.image.load("images/mainbackground.jpg")
+    background=pygame.transform.scale(background,(800, 600))
+    profilepic = pygame.image.load("images/profilepic.png")
+    profilepic=pygame.transform.scale(profilepic,(280,280))
+    lostbanner = pygame.image.load("images/lostbanner.png")
+    lostbanner=pygame.transform.scale(lostbanner,(750,184))
+
+    while True:
+        wins = get_user_wins(logged_in_user) #gets the number of wins from the database
+        total_games = get_user_total(logged_in_user) #gets the number of games from the database
+        screen.blit(background, (0, 0))  #background image
+        mouse_pos = pygame.mouse.get_pos()
+        #event handler
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if home_button.collidepoint(mouse_pos):
+                    welcome()
+                if profile_button.collidepoint(mouse_pos):
+                    profilepage()
+                if instruction_button.collidepoint(mouse_pos):
+                    instructionpage()
+        
+        screen.blit(background,(0,0))
+        screen.blit(profilepic,(100,190))
+        screen.blit(lostbanner,(10,20))
+        #losing banner is the colour red and will differentiate the page from the winning page
+
+        main_title=font.render("YOU LOST UNO :(", True, "black")
+        screen.blit(main_title,(250,100))
+
+        #formatting the text to include the wins and the games played
+        text=font2.render(f"""Wins: {wins}
+                         
+Games played: {total_games} +1""",True, "white")
+        screen.blit(text,(400,250))
+
+        #Drawing the buttons
+        home_button = draw_button("Back to home", 500, 500,
+                        250, button_height, dark_grey, grey, mouse_pos, screen)
+        profile_button = draw_button("Back to profile", 220, 500,
+                        250, button_height, dark_grey, grey, mouse_pos, screen)
+        instruction_button = draw_button("?", 680, 60,
+                        60, button_height, dark_grey, grey, mouse_pos, screen)
+
+        pygame.display.update()
+
+def winpage():
+    wins = get_user_wins(logged_in_user) #gets the wins from the database using the logged in user
+    total_games = get_user_total(logged_in_user)
+    """
+    loading and scaling the images for the winning page (will 
+    basically be the format of the profile page with the addition of 
+    the different colour banner)
+    """
+    background = pygame.image.load("images/mainbackground.jpg")
+    background=pygame.transform.scale(background,(800, 600))
+    profilepic = pygame.image.load("images/profilepic.png")
+    profilepic=pygame.transform.scale(profilepic,(280,280))
+    banner = pygame.image.load("images/banner.png")
+    banner=pygame.transform.scale(banner,(750,184))
+
+    while True:
+        
+        screen.blit(background, (0, 0))  #background image
+        mouse_pos = pygame.mouse.get_pos()
+        #event handler
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if home_button.collidepoint(mouse_pos):
+                    welcome() #go back to the welcome page is home is clicked
+                if profile_button.collidepoint(mouse_pos):
+                    profilepage() #go back to profile if profile is clicked
+                if instruction_button.collidepoint(mouse_pos):
+                    instructionpage()
+                    #go to the instruction page if the instruction button is clicked
+
+        screen.blit(background,(0,0))
+        screen.blit(profilepic,(100,190))
+        screen.blit(banner,(10,20))
+        """
+        winning banner is the colour yellow, this will differentiate 
+        between the user winning or losing
+        """
+
+        main_title=font.render("YOU WON UNO!", True, "black")
+        screen.blit(main_title,(250,80))
+        #rendering and displaying the title “YOU WON UNO!”
+
+        #formatting the text to include the wins and total games played
+        text=font2.render(f"""Wins: {wins} +1
+                         
+Games played: {total_games} +1""", True, "white")
+        screen.blit(text,(400,250))
+
+        #Drawing the buttons using the draw_button function
+        home_button = draw_button("Back to home", 500, 500,
+                        250, button_height, dark_grey, grey, mouse_pos, screen)
+        profile_button = draw_button("Back to profile", 220, 500,
+                        250, button_height, dark_grey, grey, mouse_pos, screen)
+        instruction_button = draw_button("?", 680, 60,
+                        60, button_height, dark_grey, grey, mouse_pos, screen)
+
+        pygame.display.update()
+
+start()
+
+
+
+
+
+
+
+
